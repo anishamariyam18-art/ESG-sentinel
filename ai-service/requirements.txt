@@ -1,0 +1,29 @@
+# --- Phase 1: foundation (installed & tested) ---
+pydantic==2.9.2
+pydantic-settings==2.6.1
+python-dotenv==1.0.1
+fastapi==0.115.5
+uvicorn[standard]==0.32.1
+
+# --- Phase 10: API multipart file uploads (installed & tested) ---
+python-multipart==0.0.32
+
+# --- Testing (installed & tested) ---
+pytest==8.3.3
+pytest-cov==6.0.0
+httpx==0.27.2
+
+# --- Phase 2: document processing (installed & tested) ---
+pymupdf==1.24.13
+
+# --- Phase 3: LLM abstraction (installed & tested) ---
+google-generativeai==0.8.3
+
+# --- Phase 5: evidence indexing & hybrid retrieval prep (installed & tested) ---
+sentence-transformers==3.3.1
+rank-bm25==0.2.2
+
+# --- Optional cross-encoder reranking (not used -- Phase 6's verification
+# --- engine reranks with a weighted combination of the semantic/lexical/
+# --- quality scores it already has, no additional model needed) ---
+# Cross-encoder reranking would use sentence-transformers' CrossEncoder above.

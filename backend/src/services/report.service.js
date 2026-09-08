@@ -31,12 +31,21 @@ const ensureReportExists = async(id) => {
 
 const createNewReport = async({
     userId,
+    company,
+    reportYear,
     originalFilename,
     storedFilename,
     filePath,
     fileSize,
 }) => {
-    if (!userId || !originalFilename || !storedFilename || !filePath || !fileSize) {
+    if (!userId ||
+        !company ||
+        !reportYear ||
+        !originalFilename ||
+        !storedFilename ||
+        !filePath ||
+        !fileSize
+    ) {
         const error = new Error('Missing required report data');
         error.statusCode = 400;
         throw error;
@@ -44,6 +53,8 @@ const createNewReport = async({
 
     const report = await createReport({
         userId,
+        company,
+        reportYear,
         originalFilename,
         storedFilename,
         filePath,

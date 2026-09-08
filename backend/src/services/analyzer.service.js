@@ -2,6 +2,13 @@ import { pool } from "../config/db.js";
 import { findReportById } from "../models/report.model.js";
 import logger from "../config/logger.js";
 
+const VALID_CATEGORIES = [
+    "environment",
+    "social",
+    "governance",
+    "general",
+];
+
 const VALID_VERIFICATION_STATUSES = [
     "verified",
     "unverified",
@@ -16,78 +23,117 @@ const VALID_RISK_LEVELS = [
     "critical",
 ];
 
-const VALID_CATEGORIES = [
-    "environment",
-    "social",
-    "governance",
-    "general",
-];
+const normalizeCategory = (category) => {
+    const value = String(category || "").toLowerCase();
 
-const validateAiResponse = (aiResponse) => {
-    if (!aiResponse || typeof aiResponse !== "object") {
-        const error = new Error("Invalid AI response format");
-        error.statusCode = 502;
-        throw error;
+    if (value.includes("environment")) {
+        return "environment";
     }
 
-    const {
-        summary,
-        claims,
-        greenwashing,
-        trust_score: trustScore,
-    } = aiResponse;
-
-    if (!summary || typeof summary !== "object") {
-        const error = new Error("AI response is missing a valid summary");
-        error.statusCode = 502;
-        throw error;
+    if (value.includes("social")) {
+        return "social";
     }
 
-    if (!Array.isArray(claims)) {
-        const error = new Error("AI response is missing a valid claims array");
-        error.statusCode = 502;
-        throw error;
+    if (value.includes("governance")) {
+        return "governance";
     }
 
-    if (!greenwashing || typeof greenwashing !== "object") {
-        const error = new Error("AI response is missing a valid greenwashing result");
-        error.statusCode = 502;
-        throw error;
-    }
-
-    if (!trustScore || typeof trustScore !== "object") {
-        const error = new Error("AI response is missing a valid trust score");
-        error.statusCode = 502;
-        throw error;
-    }
+    return "general";
 };
 
-const insertSummary = async(client, reportId, summary) => {
+const normalizeVerificationStatus = (status) => {
+    const value = String(status || "").toLowerCase();
+
+    if (VALID_VERIFICATION_STATUSES.includes(value)) {
+        return value;
+    }
+
+    if (value === "verified") {
+        return "verified";
+    }
+
+    if (value === "partially_verified") {
+        return "unverified";
+    }
+
+    return "unverified";
+};
+
+const normalizeRiskLevel = (risk) => {
+    const value = String(risk || "").toLowerCase();
+
+    if (VALID_RISK_LEVELS.includes(value)) {
+        return value;
+    }
+
+    return "low";
+};
+
+const getRiskPriority = (risk) => {
+    const priorities = {
+        low: 1,
+        medium: 2,
+        high: 3,
+        critical: 4,
+    };
+
+    return priorities[risk] || 1;
+};
+
+const getVerificationByClaimId = (verificationResults, claimId) => {
+    return verificationResults.find(
+        (item) => item && item.claim_id === claimId
+    ) || null;
+};
+
+const getGreenwashingByClaimId = (greenwashingResults, claimId) => {
+    return greenwashingResults.find(
+        (item) => item && item.claim_id === claimId
+    ) || null;
+};
+
+const insertSummary = async(client, reportId, analyzerResult) => {
+    const summaryText =
+        analyzerResult.executive_summary ||
+        "Not Found";
+
     await client.query(
         `INSERT INTO summaries
-      (report_id, summary, environment_score, social_score, governance_score)
-     VALUES ($1, $2, $3, $4, $5)`, [
+        (
+            report_id,
+            summary,
+            environment_score,
+            social_score,
+            governance_score
+        )
+        VALUES ($1, $2, $3, $4, $5)`, [
             reportId,
-            summary.summary || summary.text || null,
-            summary.environment_score || null,
-            summary.social_score || null,
-            summary.governance_score || null,
+            summaryText,
+
+            // Current AI response does not provide
+            // separate numeric E/S/G scores.
+            null,
+            null,
+            null,
         ]
     );
 };
 
 const insertClaim = async(client, reportId, claim) => {
-    const category = VALID_CATEGORIES.includes(claim.category) ?
-        claim.category :
-        "general";
+    const category = normalizeCategory(claim.category);
 
     const result = await client.query(
         `INSERT INTO claims
-      (report_id, claim_text, category, page_number)
-     VALUES ($1, $2, $3, $4)
-     RETURNING id`, [
+        (
+            report_id,
+            claim_text,
+            category,
+            page_number
+        )
+        VALUES ($1, $2, $3, $4)
+        RETURNING id`, [
             reportId,
-            claim.claim_text,
+            claim.claim || null,
             category,
             claim.page_number || null,
         ]
@@ -96,24 +142,34 @@ const insertClaim = async(client, reportId, claim) => {
     return result.rows[0].id;
 };
 
-const insertEvidences = async(client, claimId, evidences) => {
-    if (!Array.isArray(evidences) || evidences.length === 0) {
+const insertEvidence = async(client, claimId, evidence) => {
+    if (!evidence) {
         return;
     }
 
-    for (const evidence of evidences) {
-        await client.query(
-            `INSERT INTO evidences
-        (claim_id, source_name, source_url, evidence_text, confidence_score)
-       VALUES ($1, $2, $3, $4, $5)`, [
-                claimId,
-                evidence.source_name,
-                evidence.source_url || null,
-                evidence.evidence_text,
-                evidence.confidence_score || null,
-            ]
-        );
+    let confidenceScore = null;
+
+    if (typeof evidence.final_score === "number") {
+        confidenceScore = evidence.final_score * 100;
     }
+
+    await client.query(
+        `INSERT INTO evidences
+        (
+            claim_id,
+            source_name,
+            source_url,
+            evidence_text,
+            confidence_score
+        )
+        VALUES ($1, $2, $3, $4, $5)`, [
+            claimId,
+            evidence.source_type || "uploaded_report",
+            null,
+            evidence.evidence_text || null,
+            confidenceScore,
+        ]
+    );
 };
 
 const insertVerification = async(
@@ -121,23 +177,26 @@ const insertVerification = async(
     claimId,
     verification
 ) => {
-    if (!verification || typeof verification !== "object") {
+    if (!verification) {
         return;
     }
 
-    const status = VALID_VERIFICATION_STATUSES.includes(
-            verification.verification_status
-        ) ?
-        verification.verification_status :
-        "unverified";
+    const status = normalizeVerificationStatus(
+        verification.status
+    );
 
     await client.query(
         `INSERT INTO verifications
-      (claim_id, verification_status, confidence, reason)
-     VALUES ($1, $2, $3, $4)`, [
+        (
+            claim_id,
+            verification_status,
+            confidence,
+            reason
+        )
+        VALUES ($1, $2, $3, $4)`, [
             claimId,
             status,
-            verification.confidence || null,
+            verification.confidence_score || null,
             verification.reason || null,
         ]
     );
@@ -146,35 +205,97 @@ const insertVerification = async(
 const insertGreenwashingResult = async(
     client,
     reportId,
-    greenwashing
+    greenwashingResults
 ) => {
-    const riskLevel = VALID_RISK_LEVELS.includes(
-            greenwashing.risk_level
-        ) ?
-        greenwashing.risk_level :
-        "low";
+    if (!Array.isArray(greenwashingResults) ||
+        greenwashingResults.length === 0
+    ) {
+        return;
+    }
+
+    let highestRisk = "low";
+    let totalScore = 0;
+    let scoreCount = 0;
+    const explanations = [];
+
+    for (const result of greenwashingResults) {
+        if (!result) {
+            continue;
+        }
+
+        const risk = normalizeRiskLevel(
+            result.greenwashing_risk
+        );
+
+        if (
+            getRiskPriority(risk) >
+            getRiskPriority(highestRisk)
+        ) {
+            highestRisk = risk;
+        }
+
+        if (typeof result.greenwashing_score === "number") {
+            totalScore += result.greenwashing_score;
+            scoreCount += 1;
+        }
+
+        if (result.reason) {
+            explanations.push(result.reason);
+        }
+    }
+
+    const averageScore =
+        scoreCount > 0 ?
+        totalScore / scoreCount :
+        null;
 
     await client.query(
         `INSERT INTO greenwashing_results
-      (report_id, risk_level, score, explanation)
-     VALUES ($1, $2, $3, $4)`, [
+        (
+            report_id,
+            risk_level,
+            score,
+            explanation
+        )
+        VALUES ($1, $2, $3, $4)`, [
             reportId,
-            riskLevel,
-            greenwashing.score || null,
-            greenwashing.explanation || null,
+            highestRisk,
+            averageScore,
+            explanations.length > 0 ?
+            explanations.join(" ") :
+            null,
         ]
     );
 };
-const insertTrustScore = async(client, reportId, trustScore) => {
+
+const insertTrustScore = async(
+    client,
+    reportId,
+    trustScore
+) => {
+    if (!trustScore) {
+        return;
+    }
+
     await client.query(
         `INSERT INTO trust_scores
-      (report_id, environment_score, social_score, governance_score, overall_score)
-     VALUES ($1, $2, $3, $4, $5)`, [
+        (
+            report_id,
+            environment_score,
+            social_score,
+            governance_score,
+            overall_score
+        )
+        VALUES ($1, $2, $3, $4, $5)`, [
             reportId,
-            trustScore.environment_score || null,
-            trustScore.social_score || null,
-            trustScore.governance_score || null,
-            trustScore.overall_score || null,
+
+            // Current AI response does not provide
+            // separate E/S/G scores.
+            null,
+            null,
+            null,
+
+            trustScore.trust_score || null,
         ]
     );
 };
@@ -186,9 +307,10 @@ const updateReportStatusInTransaction = async(
 ) => {
     await client.query(
         `UPDATE reports
-     SET status = $1,
-         updated_at = CURRENT_TIMESTAMP
-     WHERE id = $2`, [status, reportId]
+        SET
+            status = $1,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = $2`, [status, reportId]
     );
 };
 
@@ -201,44 +323,85 @@ const saveAnalysis = async(reportId, aiResponse) => {
         throw error;
     }
 
-    validateAiResponse(aiResponse);
+    if (!aiResponse || typeof aiResponse !== "object") {
+        const error = new Error("Invalid AI response format");
+        error.statusCode = 502;
+        throw error;
+    }
 
-    const {
-        summary,
-        claims,
-        greenwashing,
-        trust_score: trustScore,
-    } = aiResponse;
+    const analyzerResult =
+        aiResponse.analyzer_result || {};
+
+    const claims =
+        Array.isArray(aiResponse.claims) ?
+        aiResponse.claims : [];
+
+    const verificationResults =
+        Array.isArray(aiResponse.verification_results) ?
+        aiResponse.verification_results : [];
+
+    const greenwashingResults =
+        Array.isArray(aiResponse.greenwashing_results) ?
+        aiResponse.greenwashing_results : [];
+
+    const trustScore =
+        aiResponse.trust_score || null;
 
     const client = await pool.connect();
 
     try {
         await client.query("BEGIN");
 
-        await insertSummary(client, reportId, summary);
+        await insertSummary(
+            client,
+            reportId,
+            analyzerResult
+        );
 
         for (const claim of claims) {
-            if (!claim) continue;
+            if (!claim || !claim.claim) {
+                continue;
+            }
 
-            const claimId = await insertClaim(client, reportId, claim);
-
-            await insertEvidences(
+            const claimId = await insertClaim(
                 client,
-                claimId,
-                claim.evidences
+                reportId,
+                claim
             );
+
+            const verification =
+                getVerificationByClaimId(
+                    verificationResults,
+                    claim.claim_id
+                );
+
+            if (
+                verification &&
+                Array.isArray(verification.matched_evidence)
+            ) {
+                for (
+                    const evidence of
+                    verification.matched_evidence
+                ) {
+                    await insertEvidence(
+                        client,
+                        claimId,
+                        evidence
+                    );
+                }
+            }
 
             await insertVerification(
                 client,
                 claimId,
-                claim.verification
+                verification
             );
         }
 
         await insertGreenwashingResult(
             client,
             reportId,
-            greenwashing
+            greenwashingResults
         );
 
         await insertTrustScore(
@@ -262,7 +425,10 @@ const saveAnalysis = async(reportId, aiResponse) => {
         try {
             await client.query("ROLLBACK");
         } catch (rollbackError) {
-            logger.error("Rollback failed", rollbackError);
+            logger.error(
+                "Rollback failed",
+                rollbackError
+            );
         }
 
         logger.error(
@@ -274,8 +440,12 @@ const saveAnalysis = async(reportId, aiResponse) => {
             throw err;
         }
 
-        const error = new Error("Failed to save report analysis");
+        const error = new Error(
+            "Failed to save report analysis"
+        );
+
         error.statusCode = 500;
+
         throw error;
     } finally {
         client.release();

@@ -23,3 +23,6 @@ dist/
 # Editor folders
 .vscode/
 .idea/
+
+# Database backups
+*.dump

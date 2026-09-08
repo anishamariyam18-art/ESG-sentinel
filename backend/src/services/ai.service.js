@@ -4,7 +4,7 @@ import FormData from 'form-data';
 import config from '../config/env.js';
 import logger from '../config/logger.js';
 
-const AI_REQUEST_TIMEOUT = 60000;
+const AI_REQUEST_TIMEOUT = 600000;
 
 const handleAxiosError = (err, operation) => {
     if (axios.isAxiosError(err)) {
@@ -43,7 +43,13 @@ const handleAxiosError = (err, operation) => {
     throw error;
 };
 
-const analyzeReport = async({ filePath, originalFilename }) => {
+const analyzeReport = async({
+    filePath,
+    originalFilename,
+    company,
+    reportYear,
+    evidencePolicy = 'include_current_document',
+}) => {
     if (!filePath) {
         const error = new Error('File path is required for AI analysis');
         error.statusCode = 400;
@@ -51,17 +57,44 @@ const analyzeReport = async({ filePath, originalFilename }) => {
     }
 
     if (!fs.existsSync(filePath)) {
-        const error = new Error('Report file could not be found for analysis');
+        const error = new Error(
+            'Report file could not be found for analysis'
+        );
         error.statusCode = 404;
+        throw error;
+    }
+
+    if (!company) {
+        const error = new Error(
+            'Company is required for AI analysis'
+        );
+        error.statusCode = 400;
+        throw error;
+    }
+
+    if (!reportYear) {
+        const error = new Error(
+            'Report year is required for AI analysis'
+        );
+        error.statusCode = 400;
         throw error;
     }
 
     const formData = new FormData();
 
-    formData.append('file', fs.createReadStream(filePath), {
-        filename: originalFilename || 'report.pdf',
-        contentType: 'application/pdf',
-    });
+    // PDF
+    formData.append(
+        'file',
+        fs.createReadStream(filePath), {
+            filename: originalFilename || 'report.pdf',
+            contentType: 'application/pdf',
+        }
+    );
+
+    // Required FastAPI form fields
+    formData.append('company', company);
+    formData.append('report_year', String(reportYear));
+    formData.append('evidence_policy', evidencePolicy);
 
     try {
         const response = await axios.post(
@@ -75,7 +108,9 @@ const analyzeReport = async({ filePath, originalFilename }) => {
         );
 
         if (!response.data) {
-            const error = new Error('AI service returned an empty response');
+            const error = new Error(
+                'AI service returned an empty response'
+            );
             error.statusCode = 502;
             throw error;
         }
