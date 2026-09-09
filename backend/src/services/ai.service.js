@@ -98,7 +98,7 @@ const analyzeReport = async({
 
     try {
         const response = await axios.post(
-            `${config.fastapi.baseUrl}/analyze`,
+            `${config.fastapi.baseUrl}/api/v1/analyze`,
             formData, {
                 headers: formData.getHeaders(),
                 timeout: AI_REQUEST_TIMEOUT,
@@ -124,7 +124,7 @@ const analyzeReport = async({
 const extractClaims = async(payload) => {
     try {
         const response = await axios.post(
-            `${config.fastapi.baseUrl}/extract-claims`,
+            `${config.fastapi.baseUrl}/api/v1/extract-claims`,
             payload, {
                 timeout: AI_REQUEST_TIMEOUT,
             }
@@ -139,7 +139,7 @@ const extractClaims = async(payload) => {
 const verifyClaims = async(payload) => {
     try {
         const response = await axios.post(
-            `${config.fastapi.baseUrl}/verify-claims`,
+            `${config.fastapi.baseUrl}/api/v1/verify-claims`,
             payload, {
                 timeout: AI_REQUEST_TIMEOUT,
             }
@@ -154,7 +154,7 @@ const verifyClaims = async(payload) => {
 const detectGreenwashing = async(payload) => {
     try {
         const response = await axios.post(
-            `${config.fastapi.baseUrl}/greenwashing`,
+            `${config.fastapi.baseUrl}/api/v1/greenwashing`,
             payload, {
                 timeout: AI_REQUEST_TIMEOUT,
             }
@@ -169,7 +169,7 @@ const detectGreenwashing = async(payload) => {
 const calculateTrustScore = async(payload) => {
     try {
         const response = await axios.post(
-            `${config.fastapi.baseUrl}/trust-score`,
+            `${config.fastapi.baseUrl}/api/v1/trust-score`,
             payload, {
                 timeout: AI_REQUEST_TIMEOUT,
             }
