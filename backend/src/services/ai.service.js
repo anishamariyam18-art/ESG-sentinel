@@ -4,7 +4,7 @@ import FormData from 'form-data';
 import config from '../config/env.js';
 import logger from '../config/logger.js';
 
-const AI_REQUEST_TIMEOUT = 600000;
+const AI_REQUEST_TIMEOUT = 1200000;
 
 const handleAxiosError = (err, operation) => {
     if (axios.isAxiosError(err)) {
