@@ -82,11 +82,14 @@ const uploadReport = async(req, res, next) => {
             reportYear,
             evidencePolicy,
         });
-        if (aiResult.pipeline_status === 'failed') {
+        if (
+            aiResult.pipeline_status === 'failed' ||
+            aiResult.pipeline_status === 'partial'
+        ) {
             await updateStatus(report.id, 'failed');
 
             const error = new Error(
-                'AI analysis failed'
+                `AI analysis failed: ${aiResult.errors?.join('; ') || 'Unknown AI pipeline error'}`
             );
             error.statusCode = 502;
             throw error;
